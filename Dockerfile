@@ -55,12 +55,12 @@ LABEL \
     io.hass.description="Home Assistant Community Add-on for Ring Devices without Streaming capabilities" \
     io.hass.type="addon" \
     io.hass.version=${BUILD_VERSION} \
-    maintainer="Tom Sightler <tsightler@gmail.com>" \
+    maintainer="Nicolas Cerveaux" \
     org.opencontainers.image.title="Ring-MQTT" \
-    org.opencontainers.image.description="Integrate with Ring devices using MQTT" \
-    org.opencontainers.image.authors="Tom Sightler <tsightler@gmail.com> (and various other contributors)" \
+    org.opencontainers.image.description="Security-hardened Ring MQTT bridge (no streaming)" \
+    org.opencontainers.image.authors="Nicolas Cerveaux, Tom Sightler" \
     org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.source="https://github.com/tsightler/ring-mqtt" \
-    org.opencontainers.image.documentation="https://github.com/tsightler/README.md" \
+    org.opencontainers.image.source="https://github.com/thoughtminers/ring-mqtt" \
+    org.opencontainers.image.documentation="https://github.com/thoughtminers/ring-mqtt#readme" \
     org.opencontainers.image.created=${BUILD_DATE} \
     org.opencontainers.image.version=${BUILD_VERSION}
