@@ -36,8 +36,25 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git://github.com/tsightler/ring-mqtt.git"
+    "url": "git://github.com/thoughtminers/ring-mqtt.git"
   },
-  "author": "Tom Sightler (tsightler@gmail.com)",
+  "bugs": {
+    "url": "https://github.com/thoughtminers/ring-mqtt/issues"
+  },
+  "homepage": "https://github.com/thoughtminers/ring-mqtt#readme",
+  "contributors": [
+    {
+      "name": "Tom Sightler",
+      "url": "https://github.com/tsightler"
+    },
+    {
+      "name": "Nicolas Cerveaux",
+      "url": "https://github.com/zzarbi"
+    }
+  ],
+  "funding": {
+    "type": "custom",
+    "url": "https://buymeacoffee.com/thoughtminers"
+  },
   "license": "MIT"
 }
