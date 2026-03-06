@@ -1,9 +1,5 @@
 import RingPolledDevice from './base-polled-device.js'
 import utils from '../lib/utils.js'
-import pathToFfmpeg from 'ffmpeg-for-homebridge'
-import { Worker } from 'worker_threads'
-import { spawn } from 'child_process'
-import { parseISO, addSeconds } from 'date-fns';
 import chalk from 'chalk'
 
 export default class Camera extends RingPolledDevice {
@@ -64,42 +60,6 @@ export default class Camera extends RingPolledDevice {
                 timestamp: null,
                 onDemandTimestamp: 0
             },
-            stream: {
-                live: {
-                    state: 'OFF',
-                    status: 'inactive',
-                    session: false,
-                    publishedStatus: '',
-                    worker: new Worker('./devices/camera-livestream.js', {
-                        workerData: {
-                            doorbotId: this.device.id,
-                            deviceName: this.deviceData.name
-                        }
-                    })
-                },
-                event: {
-                    state: 'OFF',
-                    status: 'inactive',
-                    session: false,
-                    publishedStatus: ''
-                },
-                keepalive:{
-                    active: false,
-                    session: false,
-                    expires: 0
-                }
-            },
-            event_select: {
-                state: savedState?.event_select?.state
-                    ? savedState.event_select.state
-                    : 'Motion 1',
-                publishedState: null,
-                pollCycle: 0,
-                recordingUrl: null,
-                recordingUrlExpire: null,
-                transcoded: false,
-                eventId: '0'
-            },
             ...this.device.hasLight ? {
                 light: {
                     state: null,
@@ -118,45 +78,6 @@ export default class Camera extends RingPolledDevice {
             motion: {
                 component: 'binary_sensor',
                 device_class: 'motion',
-                attributes: true
-            },
-            stream: {
-                component: 'switch',
-                category: 'diagnostic',
-                attributes: true,
-                name: 'Live Stream',
-                icon: 'mdi:cctv',
-                // Use internal MQTT server for inter-process communications
-                ipc: true
-            },
-            event_stream: {
-                component: 'switch',
-                category: 'diagnostic',
-                attributes: true,
-                icon: 'mdi:vhs',
-                // Use internal MQTT server for inter-process communications
-                ipc: true
-            },
-            event_select: {
-                component: 'select',
-                category: 'config',
-                options: [
-                    ...this.device.isDoorbot
-                        ? [ 'Ding 1', 'Ding 2', 'Ding 3', 'Ding 4', 'Ding 5',
-                            'Ding 1 (Transcoded)', 'Ding 2 (Transcoded)', 'Ding 3 (Transcoded)',
-                            'Ding 4 (Transcoded)', 'Ding 5 (Transcoded)'
-                        ]
-                        : [],
-                    'Motion 1', 'Motion 2', 'Motion 3', 'Motion 4', 'Motion 5',
-                    'Motion 1 (Transcoded)', 'Motion 2 (Transcoded)', 'Motion 3 (Transcoded)',
-                    'Motion 4 (Transcoded)', 'Motion 5 (Transcoded)',
-                    'Person 1', 'Person 2', 'Person 3', 'Person 4', 'Person 5',
-                    'Person 1 (Transcoded)', 'Person 2 (Transcoded)', 'Person 3 (Transcoded)',
-                    'Person 4 (Transcoded)', 'Person 5 (Transcoded)',
-                    'On-demand 1', 'On-demand 2', 'On-demand 3', 'On-demand 4', 'On-demand 5',
-                    'On-demand 1 (Transcoded)', 'On-demand 2 (Transcoded)', 'On-demand 3 (Transcoded)',
-                    'On-demand 4 (Transcoded)', 'On-demand 5 (Transcoded)',
-                ],
                 attributes: true
             },
             ...this.device.isDoorbot ? {
@@ -241,35 +162,6 @@ export default class Camera extends RingPolledDevice {
             }
         }
 
-        this.data.stream.live.worker.on('message', (message) => {
-            if (message.type === 'state') {
-                switch (message.data) {
-                    case 'active':
-                        this.data.stream.live.status = 'active'
-                        this.data.stream.live.session = true
-                        break;
-                    case 'inactive':
-                        this.data.stream.live.status = 'inactive'
-                        this.data.stream.live.session = false
-                        break;
-                    case 'failed':
-                        this.data.stream.live.status = 'failed'
-                        this.data.stream.live.session = false
-                        break;
-                }
-                this.publishStreamState()
-            } else {
-                switch (message.type) {
-                    case 'log_info':
-                        this.debug(message.data, 'wrtc')
-                        break;
-                    case 'log_error':
-                        this.debug(chalk.redBright(message.data), 'wrtc')
-                        break;
-                }
-            }
-        })
-
         this.device.onNewNotification.subscribe(notification => {
             this.processNotification(notification)
         })
@@ -286,9 +178,6 @@ export default class Camera extends RingPolledDevice {
                 mode: this.data.snapshot.mode,
                 autoInterval: this.data.snapshot.autoInterval,
                 interval: this.data.snapshot.intervalDuration
-            },
-            event_select: {
-                state: this.data.event_select.state
             },
             motion: {
                 duration: this.data.motion.duration
@@ -348,18 +237,6 @@ export default class Camera extends RingPolledDevice {
             this.data.motion.is_person = Boolean(lastMotionEvent?.cv?.person_detected)
             this.data.motion.latestEventId = lastMotionEvent.event_id
 
-            // Try to get URL for most recent motion event, if it fails, assume there's no subscription
-            let recordingUrl = false
-            const recordingEvent = this.data.motion.events.find(e => e.recording_status === 'ready')
-            if (recordingEvent && Array.isArray(recordingEvent.visualizations?.cloud_media_visualization?.media)) {
-                recordingUrl = (recordingEvent.visualizations.cloud_media_visualization.media.find(e => e.file_type === 'VIDEO'))?.url
-            }
-
-            if (!recordingUrl) {
-                this.debug('Could not retrieve recording URL for any motion event, assuming no Ring Protect subscription')
-                delete this.entity.event_stream
-                delete this.entity.event_select
-            }
         } else {
             this.debug('Unable to retrieve most recent motion event for this camera')
         }
@@ -385,27 +262,6 @@ export default class Camera extends RingPolledDevice {
             }
         }
 
-        let stillImageUrlBase = 'localhost'
-        let streamSourceUrlBase
-        if (process.env.RUNMODE === 'addon') {
-            // For the addon we get some values populated from the startup script
-            // that queries the HA API via bashio
-            stillImageUrlBase = process.env.HAHOSTNAME
-            streamSourceUrlBase = process.env.ADDONHOSTNAME
-        } else if (process.env.RUNMODE === 'docker') {
-            // For docker we don't have any API to query so we just use the IP of the docker container
-            // since it probably doesn't have a DNS entry
-            streamSourceUrlBase = await utils.getHostIp()
-        } else {
-            // For the stadalone install we try to get the host FQDN
-            streamSourceUrlBase = await utils.getHostFqdn()
-        }
-
-        // Set some helper attributes for streaming
-        this.data.stream.live.stillImageURL = `https://${stillImageUrlBase}:8123{{ states.camera.${this.device.name.toLowerCase().replace(" ","_")}_snapshot.attributes.entity_picture }}`,
-        this.data.stream.live.streamSource = (utils.config().livestream_user && utils.config().livestream_pass)
-            ? `rtsp://${utils.config().livestream_user}:${utils.config().livestream_pass}@${streamSourceUrlBase}:8554/${this.deviceId}_live`
-            : `rtsp://${streamSourceUrlBase}:8554/${this.deviceId}_live`
     }
 
     updateSnapshotMode() {
@@ -436,24 +292,7 @@ export default class Camera extends RingPolledDevice {
         const isPublish = Boolean(data === undefined)
         this.publishPolledState(isPublish)
 
-        // Checks for new events or expired recording URL every 3 polling cycles (~1 minute)
-        if (this.entity.hasOwnProperty('event_select')) {
-            this.data.event_select.pollCycle--
-            if (this.data.event_select.pollCycle <= 0) {
-                this.data.event_select.pollCycle = 3
-                if (await this.updateEventStreamUrl() && !isPublish) {
-                    this.publishEventSelectState()
-                }
-            }
-        }
-
         if (isPublish) {
-            // Publish stream state
-            this.publishStreamState(isPublish)
-            if (this.entity.event_select) {
-                this.publishEventSelectState(isPublish)
-            }
-
             this.publishDingStates()
             this.publishDingDurationState(isPublish)
             this.publishSnapshotMode()
@@ -611,10 +450,7 @@ export default class Camera extends RingPolledDevice {
 
     // Publish device data to info topic
     async publishAttributes() {
-        const attributes = {
-            stream_Source: this.data.stream.live.streamSource,
-            still_Image_URL: this.data.stream.live.stillImageURL
-        }
+        const attributes = {}
         const deviceHealth = await this.device.getHealth()
 
         if (this.device.batteryLevel || this.hasBattery1 || this.hasBattery2) {
@@ -672,41 +508,6 @@ export default class Camera extends RingPolledDevice {
 
     publishSnapshotMode() {
         this.mqttPublish(this.entity.snapshot_mode.state_topic, this.data.snapshot.mode)
-    }
-
-    publishStreamState(isPublish) {
-        ['live', 'event'].forEach(type => {
-            const entityProp = (type === 'live') ? 'stream' : `${type}_stream`
-            if (this.entity.hasOwnProperty(entityProp)) {
-                const streamState = (this.data.stream[type].status === 'active' || this.data.stream[type].status === 'activating') ? 'ON' : 'OFF'
-                if (streamState !== this.data.stream[type].state || isPublish) {
-                    this.data.stream[type].state = streamState
-                    this.mqttPublish(this.entity[entityProp].state_topic, this.data.stream[type].state)
-                    // Publish state to IPC broker as well
-                    utils.event.emit('mqtt_ipc_publish', this.entity[entityProp].state_topic, this.data.stream[type].state)
-                }
-
-                if (this.data.stream[type].publishedStatus !== this.data.stream[type].status || isPublish) {
-                    this.data.stream[type].publishedStatus = this.data.stream[type].status
-                    const attributes = { status: this.data.stream[type].status }
-                    this.mqttPublish(this.entity[entityProp].json_attributes_topic, JSON.stringify(attributes), 'attr')
-                    // Publish attribute state to IPC broker as well
-                    utils.event.emit('mqtt_ipc_publish', this.entity[entityProp].json_attributes_topic, JSON.stringify(attributes))
-                }
-            }
-        })
-    }
-
-    publishEventSelectState(isPublish) {
-        if (this.data.event_select.state !== this.data.event_select.publishedState || isPublish) {
-            this.data.event_select.publishedState = this.data.event_select.state
-            this.mqttPublish(this.entity.event_select.state_topic, this.data.event_select.state)
-        }
-        const attributes = {
-            recordingUrl: this.data.event_select.recordingUrl,
-            eventId: this.data.event_select.eventId
-        }
-        this.mqttPublish(this.entity.event_select.json_attributes_topic, JSON.stringify(attributes), 'attr', '<recording_url_masked>')
     }
 
     publishDingDurationState(isPublish) {
@@ -790,306 +591,6 @@ export default class Camera extends RingPolledDevice {
         }
     }
 
-    async startLiveStream(rtspPublishUrl) {
-        this.data.stream.live.session = true
-
-        const streamData = {
-            rtspPublishUrl,
-            ticket: null
-        }
-
-        try {
-            this.debug('Acquiring a live stream WebRTC signaling session ticket')
-            const response = await this.device.restClient.request({
-                method: 'POST',
-                url: 'https://app.ring.com/api/v1/clap/ticket/request/signalsocket'
-            })
-            streamData.ticket = response.ticket
-        } catch(error) {
-            if (error?.response?.statusCode === 403) {
-                this.debug(`Camera returned 403 when starting a live stream.  This usually indicates that live streaming is blocked by Modes settings.  Check your Ring app and verify that you are able to stream from this camera with the current Modes settings.`)
-            } else {
-                this.debug(error)
-            }
-        }
-
-        if (streamData.ticket) {
-            this.debug('Live stream WebRTC signaling session ticket acquired, starting live stream worker')
-            this.data.stream.live.worker.postMessage({ command: 'start', streamData })
-        } else {
-            this.debug('Live stream failed to initialize WebRTC signaling session')
-            this.data.stream.live.status = 'failed'
-            this.data.stream.live.session = false
-            this.publishStreamState()
-        }
-    }
-
-    async startEventStream(rtspPublishUrl) {
-        const eventSelect = this.data.event_select.state.split(' ')
-        const eventType = eventSelect[0].toLowerCase().replace('-', '_')
-        const eventNumber = eventSelect[1]
-
-        if (this.data.event_select.recordingUrl.match(/Recording Not Found|Transcoding in Progress/)) {
-            this.debug(`No recording available for the ${(eventNumber==1?"":eventNumber==2?"2nd ":eventNumber==3?"3rd ":eventNumber+"th ")}most recent ${eventType} event!`)
-            this.data.stream.event.status = 'failed'
-            this.data.stream.event.session = false
-            this.publishStreamState()
-            return
-        }
-
-        this.debug(`Streaming the ${(eventNumber==1?"":eventNumber==2?"2nd ":eventNumber==3?"3rd ":eventNumber+"th ")}most recently recorded ${eventType} event`)
-
-        try {
-            if (this.data.event_select.transcoded || this.hevcEnabled) {
-                // If camera is in HEVC mode, recordings are also in HEVC so transcode the video back to H.264/AVC on the fly
-                // Ring videos transcoded for download are not optimized for RTSP streaming (limited keyframes) so they must
-                // also be re-transcoded on-the-fly to allow streamers to join early
-                this.data.stream.event.session = spawn(pathToFfmpeg, [
-                    '-re',
-                    '-i', this.data.event_select.recordingUrl,
-                    '-map', '0:v',
-                    '-map', '0:a',
-                    '-map', '0:a',
-                    '-c:v', 'libx264',
-                    '-g', '20',
-                    '-keyint_min', '10',
-                    '-crf', '23',
-                    '-preset', 'ultrafast',
-                    '-c:a:0', 'copy',
-                    '-c:a:1', 'libopus',
-                    '-flags', '+global_header',
-                    '-rtsp_transport', 'tcp',
-                    '-f', 'rtsp',
-                    rtspPublishUrl
-                ])
-            } else {
-                this.data.stream.event.session = spawn(pathToFfmpeg, [
-                    '-re',
-                    '-i', this.data.event_select.recordingUrl,
-                    '-map', '0:v',
-                    '-map', '0:a',
-                    '-map', '0:a',
-                    '-c:v', 'copy',
-                    '-c:a:0', 'copy',
-                    '-c:a:1', 'libopus',
-                    '-flags', '+global_header',
-                    '-rtsp_transport', 'tcp',
-                    '-f', 'rtsp',
-                    rtspPublishUrl
-                ])
-            }
-
-            this.data.stream.event.session.on('spawn', async () => {
-                this.debug(`The recorded ${eventType} event stream has started`)
-                this.data.stream.event.status = 'active'
-                this.publishStreamState()
-            })
-
-            this.data.stream.event.session.on('close', async () => {
-                this.debug(`The recorded ${eventType} event stream has ended`)
-                this.data.stream.event.status = 'inactive'
-                this.data.stream.event.session = false
-                this.publishStreamState()
-            })
-        } catch(e) {
-            this.debug(e)
-            this.data.stream.event.status = 'failed'
-            this.data.stream.event.session = false
-            this.publishStreamState()
-        }
-    }
-
-    async startKeepaliveStream() {
-        const duration = 86400
-        if (this.data.stream.keepalive.active) { return }
-        this.data.stream.keepalive.active = true
-
-        const rtspPublishUrl = (utils.config().livestream_user && utils.config().livestream_pass)
-            ? `rtsp://${utils.config().livestream_user}:${utils.config().livestream_pass}@localhost:8554/${this.deviceId}_live`
-            : `rtsp://localhost:8554/${this.deviceId}_live`
-
-        this.debug(`Starting a keepalive stream for camera`)
-
-        // Keepalive stream is used only when the live stream is started
-        // manually. It copies only the audio stream to null output just to
-        // trigger rtsp server to start the on-demand stream and keep it running
-        // when there are no other RTSP readers.
-        this.data.stream.keepalive.session = spawn(pathToFfmpeg, [
-            '-i', rtspPublishUrl,
-            '-map', '0:a:0',
-            '-c:a', 'copy',
-            '-f', 'null',
-            '/dev/null'
-        ])
-
-        this.data.stream.keepalive.session.on('spawn', async () => {
-            this.debug(`The keepalive stream has started`)
-        })
-
-        this.data.stream.keepalive.session.on('close', async () => {
-            this.data.stream.keepalive.active = false
-            this.data.stream.keepalive.session = false
-            this.debug(`The keepalive stream has stopped`)
-        })
-
-        // The keepalive stream will time out after 24 hours
-        this.data.stream.keepalive.expires = Math.floor(Date.now()/1000) + duration
-        while (this.data.stream.keepalive.active && Math.floor(Date.now()/1000) < this.data.stream.keepalive.expires) {
-            await utils.sleep(60)
-        }
-        this.data.stream.keepalive.session.kill()
-        this.data.stream.keepalive.active = false
-        this.data.stream.keepalive.session = false
-    }
-
-    async updateEventStreamUrl() {
-        const eventSelect = this.data.event_select.state.split(' ')
-        const eventType = eventSelect[0].toLowerCase().replace('-', '_')
-        const eventNumber = eventSelect[1]
-        const transcoded = Boolean(eventSelect[2] === '(Transcoded)')
-        const urlExpired = this.data.event_select.recordingUrlExpire < Date.now()
-        let selectedEvent
-        let recordingUrl = false
-
-        try {
-            const events = await(this.getRecordedEvents(eventType, eventNumber))
-            if (events.length >= eventNumber) {
-                selectedEvent = events[eventNumber-1]
-                if (selectedEvent.event_id !== this.data.event_select.eventId || this.data.event_select.transcoded !== transcoded) {
-                    if (this.data.event_select.recordingUrl) {
-                        this.debug(`New ${this.data.event_select.state} event detected, updating the recording URL`)
-                    }
-                    recordingUrl = await this.getRecordingUrl(selectedEvent, transcoded)
-                } else if (urlExpired) {
-                    this.debug(`Previous ${this.data.event_select.state} URL has expired, updating the recording URL`)
-                    recordingUrl = await this.getRecordingUrl(selectedEvent, transcoded)
-                }
-            } else {
-                this.debug(`No event recording corresponding to ${this.data.event_select.state} was found in device event history`)
-            }
-        } catch(error) {
-            this.debug(error)
-            this.debug(`Failed to retrieve recording URL for ${this.data.event_select.state} event`)
-        }
-
-        if (recordingUrl) {
-            this.data.event_select.recordingUrl = recordingUrl
-            this.data.event_select.transcoded = transcoded
-            this.data.event_select.eventId = selectedEvent.event_id
-
-            try {
-                const urlSearch = new URLSearchParams(recordingUrl)
-                const amzExpires = Number(urlSearch.get('X-Amz-Expires'))
-                const amzDate = parseISO(urlSearch.get('X-Amz-Date'))
-                this.data.event_select.recordingUrlExpire = Date.parse(addSeconds(amzDate, amzExpires/3*2))
-            } catch {
-                this.data.event_select.recordingUrlExpire = Date.now() + 600000
-            }
-        } else if (urlExpired || !selectedEvent) {
-            this.data.event_select.recordingUrl = '<Recording Not Found>'
-            this.data.event_select.transcoded = transcoded
-            this.data.event_select.eventId = '0'
-        }
-
-        return recordingUrl
-    }
-
-    async getRecordedEvents(eventType, eventNumber) {
-        let events = []
-        let paginationKey = false
-        let loop = eventType === 'person' ? 4 : 1
-
-        try {
-            while (loop > 0) {
-                const history = await this.getDeviceHistory({
-                    ...paginationKey ? { pagination_key: paginationKey }: {},
-                    event_types: eventType === 'person' ? 'motion' : eventType,
-                    limit: eventType === 'person' ? 50 : eventNumber
-                })
-
-                if (Array.isArray(history.items) && history.items.length > 0) {
-                    const newEvents = eventType === 'person'
-                        ? history.items.filter(i => i.recording_status === 'ready' && i.cv.person_detected)
-                        : history.items.filter(i => i.recording_status === 'ready')
-                    events = [...events, ...newEvents]
-                }
-
-                // Remove base64 padding characters from pagination key
-                paginationKey = history.pagination_key ? history.pagination_key.replace(/={1,2}$/, '') : false
-
-                // If we have enough events, break the loop, otherwise decrease the loop counter
-                loop = (events.length >= eventNumber || !history.paginationKey) ? 0 : loop-1
-            }
-        } catch(error) {
-            this.debug(error)
-        }
-
-        return events
-    }
-
-    async getRecordingUrl(event, transcoded) {
-        let recordingUrl
-        if (transcoded) {
-            recordingUrl = await this.getTranscodedUrl(event)
-        } else {
-            if (event && Array.isArray(event.visualizations?.cloud_media_visualization?.media)) {
-                recordingUrl = (event.visualizations.cloud_media_visualization.media.find(e => e.file_type === 'VIDEO'))?.url
-            }
-        }
-        return recordingUrl
-    }
-
-    async getTranscodedUrl(event) {
-        let response
-        let loop = 60
-
-        try {
-            response = await this.device.restClient.request({
-                method: 'POST',
-                url: 'https://api.ring.com/share_service/v2/transcodings/downloads',
-                json: {
-                    'ding_id': event.event_id,
-                    'file_type': 'VIDEO',
-                    'send_push_notification': false
-                }
-            })
-
-            if (response?.status === 'pending') {
-                this.data.event_select.recordingUrl = '<Transcoding in Progress>'
-                this.publishEventSelectState()
-            }
-        } catch(err) {
-            this.debug(err)
-            this.debug('Request to generate transcoded video failed')
-            return false
-        }
-
-        while (response?.status === 'pending' && loop > 0) {
-            try {
-                response = await this.device.restClient.request({
-                    method: 'GET',
-                    url: `https://api.ring.com/share_service/v2/transcodings/downloads/${event.event_id}?file_type=VIDEO`
-                })
-            } catch(err) {
-                this.debug(err)
-                this.debug('Request for transcoded video status failed')
-            }
-            await utils.sleep(1)
-            loop--
-        }
-
-        if (response?.status === 'done') {
-            return response.result_url
-        } else {
-            if (loop < 1) {
-                this.debug('Timeout waiting for transcoded video to be processed')
-            } else {
-                this.debug('Failed to retrieve transcoded video URL after 60')
-            }
-            return false
-        }
-    }
-
     // Process messages from MQTT command topic
     processCommand(command, message) {
         const entityKey = command.split('/')[0]
@@ -1113,15 +614,6 @@ export default class Camera extends RingPolledDevice {
                 break;
             case 'take_snapshot/command':
                 this.takeSnapshot(message)
-                break;
-            case 'stream/command':
-                this.setLiveStreamState(message)
-                break;
-            case 'event_stream/command':
-                this.setEventStreamState(message)
-                break;
-            case 'event_select/command':
-                this.setEventSelect(message)
                 break;
             case 'ding_duration/command':
                 this.setDingDuration(message, 'ding')
@@ -1295,89 +787,6 @@ export default class Camera extends RingPolledDevice {
             this.debug(`Received invalid command for snapshot mode`)
         }
 }
-
-    setLiveStreamState(message) {
-        const command = message.toLowerCase()
-        this.debug(`Received set live stream state ${message}`)
-        if (command.startsWith('on-demand')) {
-            if (this.data.stream.live.status === 'active' || this.data.stream.live.status === 'activating') {
-                this.publishStreamState()
-            } else {
-                this.data.stream.live.status = 'activating'
-                this.publishStreamState()
-                this.startLiveStream(message.split(' ')[1]) // Portion after space is the RTSP publish URL
-            }
-        } else {
-            switch (command) {
-                case 'on':
-                    // Stream was manually started, create a dummy, audio only
-                    // RTSP source stream to trigger stream startup and keep it active
-                    this.startKeepaliveStream()
-                    break;
-                case 'off':
-                    if (this.data.stream.keepalive.session) {
-                        this.debug('Stopping the keepalive stream')
-                        this.data.stream.keepalive.session.kill()
-                    } else if (this.data.stream.live.session) {
-                        this.data.stream.live.worker.postMessage({ command: 'stop' })
-                    } else {
-                        this.data.stream.live.status = 'inactive'
-                        this.publishStreamState()
-                    }
-                    break;
-                default:
-                    this.debug(`Received unknown command for live stream`)
-            }
-        }
-    }
-
-    setEventStreamState(message) {
-        const command = message.toLowerCase()
-        this.debug(`Received set event stream state ${message}`)
-        if (command.startsWith('on-demand')) {
-            if (this.data.stream.event.status === 'active' || this.data.stream.event.status === 'activating') {
-                this.publishStreamState()
-            } else {
-                this.data.stream.event.status = 'activating'
-                this.publishStreamState()
-                this.startEventStream(message.split(' ')[1]) // Portion after backslash is RTSP publish URL
-            }
-        } else {
-            switch (command) {
-                case 'on':
-                    this.debug(`Event stream can only be started on-demand!`)
-                    break;
-                case 'off':
-                    if (this.data.stream.event.session) {
-                        this.data.stream.event.session.kill()
-                    } else {
-                        this.data.stream.event.status = 'inactive'
-                        this.publishStreamState()
-                    }
-                    break;
-                default:
-                    this.debug(`Received unknown command for event stream`)
-            }
-        }
-    }
-
-    // Set Stream Select Option
-    async setEventSelect(message) {
-        this.debug(`Received set event stream to ${message}`)
-        if (this.entity.event_select.options.includes(message)) {
-            // Kill any active event streams
-            if (this.data.stream.event.session) {
-                this.data.stream.event.session.kill()
-            }
-            // Set the new value and save the state
-            this.data.event_select.state = message
-            this.updateDeviceState()
-            await this.updateEventStreamUrl()
-            this.publishEventSelectState()
-        } else {
-            this.debug('Received invalid value for event stream')
-        }
-    }
 
     setDingDuration(message, dingType) {
         this.debug(`Received set notification duration for ${dingType} events`)
