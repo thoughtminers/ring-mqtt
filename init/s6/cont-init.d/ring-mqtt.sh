@@ -21,11 +21,11 @@ fi
 sleep .5
 
 echo "-------------------------------------------------------"
-echo "| Ring-MQTT with Video Streaming                      |"
+echo "| Ring-MQTT (Security-Hardened Fork)                  |"
 echo "| ${RUNMODE_BANNER}                            |"
 echo "|                                                     |"
 echo "| For support questions please visit:                 |"
-echo "| https://github.com/tsightler/ring-mqtt/discussions  |"
+echo "| https://github.com/thoughtminers/ring-mqtt/issues   |"
 echo "-------------------------------------------------------"
 
 if [ -v BRANCH ]; then
